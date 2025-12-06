@@ -59,7 +59,7 @@ const App: React.FC = () => {
              <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
                  <Zap size={14} className="text-black fill-current" />
              </div>
-             <span className="font-bold text-sm tracking-tight text-white">Gemini Live</span>
+             <span className="font-bold text-sm tracking-tight text-white">RorHash</span>
              <span className="text-zinc-600 text-sm">/</span>
              <span className="text-zinc-400 text-sm font-medium">{mode === 'dictation' ? 'Dictation' : mode === 'upload' ? 'Upload' : 'Chat'}</span>
           </div>
@@ -157,7 +157,7 @@ const App: React.FC = () => {
                  )}
               </div>
               <h1 className="text-3xl font-bold tracking-tight text-white mb-3">
-                {mode === 'dictation' ? 'Smart Dictation' : 'Gemini Voice'}
+                {mode === 'dictation' ? 'Smart Dictation' : 'RorHash Voice'}
               </h1>
               <p className="text-zinc-500 max-w-md mx-auto mb-8 font-khmer leading-relaxed">
                 {mode === 'dictation'
