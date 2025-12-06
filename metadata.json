@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Live: Khmer & English",
+  "description": "A bilingual app supporting conversational voice chat and smart dictation with context awareness using Gemini 2.5 Live API.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
