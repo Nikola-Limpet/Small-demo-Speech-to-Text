@@ -1,6 +1,6 @@
 # RorHash
 
-A bilingual voice application supporting conversational voice chat, smart dictation, and audio file transcription with context awareness using the Gemini 2.5 Live API.
+A bilingual voice application supporting conversational voice chat, smart dictation, and audio file transcription with context awareness.
 
 ## Features
 
@@ -14,14 +14,12 @@ A bilingual voice application supporting conversational voice chat, smart dictat
 - React 19
 - TypeScript
 - Vite
-- Google Gemini API (`@google/genai`)
 - Lucide React (icons)
 
 ## Prerequisites
 
 - Node.js 18+
 - pnpm (or npm/yarn)
-- Google Gemini API key
 
 ## Setup
 
@@ -60,9 +58,6 @@ Upload audio files for transcription. Supports common audio formats.
 
 ## Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GEMINI_API_KEY` | Your Google Gemini API key | Yes |
 
 ## License
 
