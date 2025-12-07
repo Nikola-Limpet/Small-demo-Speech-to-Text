@@ -1,3 +1,5 @@
+'use client';
+
 import { useState, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
 
@@ -15,7 +17,7 @@ export const useAudioUpload = (): UseAudioUploadResult => {
   const [error, setError] = useState<string | null>(null);
 
   const transcribe = useCallback(async (file: File) => {
-    if (!process.env.API_KEY) {
+    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
       setError('API Key is not configured');
       return;
     }
@@ -25,7 +27,7 @@ export const useAudioUpload = (): UseAudioUploadResult => {
     setError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
 
       // Read file as base64
       const base64 = await new Promise<string>((resolve, reject) => {

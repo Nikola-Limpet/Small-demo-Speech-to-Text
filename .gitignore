@@ -6,7 +6,8 @@ node_modules
 dist
 dist-ssr
 build
-*.local
+.next
+out
 
 # Logs
 logs
@@ -53,6 +54,7 @@ coverage
 .cache
 .parcel-cache
 .vite
+.vercel
 
 # Temporary files
 *.tmp

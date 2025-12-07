@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useRef, useState } from 'react';
 import { Upload, FileAudio, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 

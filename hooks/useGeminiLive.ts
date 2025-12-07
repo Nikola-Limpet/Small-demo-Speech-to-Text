@@ -1,7 +1,16 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+'use client';
+
+import { useState, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { ConnectionState, Message, AppMode } from '../types';
-import { createBlob, decode, decodeAudioData, downsampleTo16000 } from '../utils/audioUtils';
+import { ConnectionState, Message, AppMode } from '@/types';
+import { createBlob, decode, decodeAudioData, downsampleTo16000 } from '@/utils/audioUtils';
+import {
+  extractFromTranscription,
+  contextManager,
+  ExtractionResult,
+  ConversationContext,
+  UserInfo
+} from '@/utils/dataExtraction';
 
 // System instruction to enforce bilingual behavior for Conversation
 const CONVERSATION_INSTRUCTION = `
@@ -13,26 +22,57 @@ If the user speaks in English, respond in English.
 Keep your responses concise and conversational, suitable for a voice interface.
 `;
 
-// System instruction for Smart Dictation
+// System instruction for Smart Dictation with Contextual Enhancement
 const DICTATION_INSTRUCTION = `
-You are a professional, intelligent speech-to-text dictation system.
-Your task is to transcribe the user's speech accurately into text.
-You support both Khmer and English.
+You are an intelligent voice-to-text assistant that transforms speech into well-structured, contextual content.
+You support both Khmer and English seamlessly.
+
+YOUR TASK:
+Listen to the user's speech and output an ENHANCED, CONTEXTUAL version of what they said.
+
 KEY BEHAVIORS:
-1. "Smart Formatting": Use context to determine formatting. Use bullet points for lists, indentation for structure, and new lines for pauses or topic changes.
-2. "Indent Inline Context Awareness": If the user dictates structured content (like a plan, code, or hierarchy), use indentation to represent this visually.
-3. Do NOT converse. Do NOT answer questions. Do NOT say "Here is the transcription".
-4. Output ONLY the transcribed text.
-5. If the user corrects themselves, transcribe the correction, not the mistake if obvious.
-6. Handle mixed Khmer and English speech seamlessly.
+1. "Smart Transcription": Capture the user's intent and meaning, not just raw words.
+2. "Contextual Enhancement":
+   - Clean up filler words (um, uh, like, you know)
+   - Fix grammar and sentence structure
+   - Add appropriate punctuation
+   - Organize into logical paragraphs
+3. "Smart Formatting":
+   - Use bullet points for lists
+   - Use headers for topic changes
+   - Use indentation for hierarchical content
+   - Format dates, times, and numbers properly
+4. "Information Extraction":
+   - Highlight key information (names, dates, action items)
+   - Structure meeting notes or ideas clearly
+   - Identify and format action items with checkboxes: [ ]
+5. "Professional Output":
+   - Make the text read professionally
+   - Keep the user's voice and intent
+   - Do NOT add information that wasn't mentioned
+   - Do NOT converse or respond - just output the enhanced text
+6. Handle mixed Khmer and English speech naturally.
+
+EXAMPLE:
+User says: "um so I need to call john tomorrow at like 3pm about the uh project deadline and also send an email to sarah"
+Output:
+**Action Items:**
+- [ ] Call John tomorrow at 3:00 PM - discuss project deadline
+- [ ] Send email to Sarah
 `;
 
-const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
+// Get model name from environment variable with fallback
+const MODEL_NAME = process.env.NEXT_PUBLIC_GEMINI_MODEL || 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 export const useGeminiLive = () => {
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [messages, setMessages] = useState<Message[]>([]);
   const [volume, setVolume] = useState<number>(0);
+
+  // Data extraction state
+  const [extractedData, setExtractedData] = useState<ExtractionResult | null>(null);
+  const [conversationContext, setConversationContext] = useState<ConversationContext | null>(null);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   
   // Audio Contexts and Nodes
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -54,7 +94,7 @@ export const useGeminiLive = () => {
   const currentOutputTranscriptionRef = useRef<string>('');
 
   const connect = useCallback(async (mode: AppMode) => {
-    if (!process.env.API_KEY) {
+    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
       console.error("API Key is missing");
       setConnectionState(ConnectionState.ERROR);
       return;
@@ -82,7 +122,7 @@ export const useGeminiLive = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
 
       // Determine System Instruction based on Mode
       const systemInstruction = mode === 'dictation' ? DICTATION_INSTRUCTION : CONVERSATION_INSTRUCTION;
@@ -113,18 +153,21 @@ export const useGeminiLive = () => {
             scriptProcessorRef.current = processor;
             
             processor.onaudioprocess = (e) => {
+              // Guard against null context (can happen if disconnect is called during processing)
+              if (!inputAudioContextRef.current) return;
+
               const inputData = e.inputBuffer.getChannelData(0);
-              
+
               // Simple volume calculation for visualizer
               let sum = 0;
               for(let i=0; i<inputData.length; i++) sum += inputData[i] * inputData[i];
               const rms = Math.sqrt(sum / inputData.length);
               setVolume(Math.min(rms * 5, 1)); // Amplify for visualizer
-              
+
               // Downsample to 16000Hz before sending to Gemini
-              const downsampledData = downsampleTo16000(inputData, inputAudioContextRef.current!.sampleRate);
+              const downsampledData = downsampleTo16000(inputData, inputAudioContextRef.current.sampleRate);
               const pcmBlob = createBlob(downsampledData);
-              
+
               sessionPromiseRef.current?.then((session) => {
                 session.sendRealtimeInput({ media: pcmBlob });
               });
@@ -172,29 +215,44 @@ export const useGeminiLive = () => {
 
             // Handle Turn Completion (Finalize messages)
             if (message.serverContent?.turnComplete) {
+               let newUserText = '';
+               let newModelText = '';
+
                if (currentInputTranscriptionRef.current) {
-                 const finalText = currentInputTranscriptionRef.current;
+                 newUserText = currentInputTranscriptionRef.current;
                  setMessages(prev => [
                    ...prev.filter(m => m.id !== 'current-user'),
-                   { id: Date.now().toString() + '-user', role: 'user', text: finalText, timestamp: new Date(), isPartial: false }
+                   { id: Date.now().toString() + '-user', role: 'user', text: newUserText, timestamp: new Date(), isPartial: false }
                  ]);
                  currentInputTranscriptionRef.current = '';
                }
-               
+
                if (currentOutputTranscriptionRef.current) {
-                 const finalText = currentOutputTranscriptionRef.current;
+                 newModelText = currentOutputTranscriptionRef.current;
                  setMessages(prev => [
                    ...prev.filter(m => m.id !== 'current-model'),
-                   { id: Date.now().toString() + '-model', role: 'model', text: finalText, timestamp: new Date(), isPartial: false }
+                   { id: Date.now().toString() + '-model', role: 'model', text: newModelText, timestamp: new Date(), isPartial: false }
                  ]);
                  currentOutputTranscriptionRef.current = '';
+               }
+
+               // Process data extraction on completed transcriptions
+               const textToProcess = [newUserText, newModelText].filter(Boolean).join(' ');
+               if (textToProcess.trim()) {
+                 const extraction = extractFromTranscription(textToProcess);
+                 setExtractedData(extraction);
+
+                 // Update context manager with cumulative data
+                 contextManager.updateContext(extraction);
+                 setConversationContext(contextManager.getContext());
+                 setUserInfo(contextManager.getUserInfo());
                }
             }
             
             // Handle Audio Output
             // Only play audio in 'conversation' mode
             if (mode === 'conversation') {
-              const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+              const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
               if (base64Audio && outputAudioContextRef.current && outputNodeRef.current) {
                  const ctx = outputAudioContextRef.current;
                  nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
@@ -294,10 +352,16 @@ export const useGeminiLive = () => {
     // Reset buffers
     currentInputTranscriptionRef.current = '';
     currentOutputTranscriptionRef.current = '';
-    
+
     // Close Session (Conceptual - session logic is handled by cutting streams)
     sessionPromiseRef.current = null;
-    
+
+    // Reset extraction data
+    contextManager.reset();
+    setExtractedData(null);
+    setConversationContext(null);
+    setUserInfo(null);
+
     setConnectionState(ConnectionState.DISCONNECTED);
     setVolume(0);
   }, []);
@@ -307,6 +371,10 @@ export const useGeminiLive = () => {
     disconnect,
     connectionState,
     messages,
-    volume
+    volume,
+    // Data extraction outputs
+    extractedData,
+    conversationContext,
+    userInfo
   };
 };
